@@ -103,20 +103,22 @@ const api = {
   // Admin endpoints
   login: async (email, password) => {
     try {
-      const data = await jsonRequest('/api/auth/login', {
+      let data = await jsonRequest('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
         headers: {
           'Content-Type': 'application/json'
         }
       });
+
+      data = data['data']
       
       if (data.token) {
         if (typeof window !== 'undefined') {
           localStorage.setItem('adminToken', data.token);
           localStorage.setItem('adminUser', JSON.stringify(data.user || {}));
         }
-        return { success: true, data };
+        return { success: true, ...data };
       }
       
       return { success: false, message: data.message || 'Login failed' };
