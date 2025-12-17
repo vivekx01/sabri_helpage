@@ -33,6 +33,7 @@ import AdminLogin from './components/AdminLogin';
 import AdminPanel from './components/AdminPanel';
 import api from './services/api.mjs';
 import { useEffect } from 'react';
+import { usePagesStore } from './stores/pageInformationSlice';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -65,7 +66,8 @@ class ErrorBoundary extends React.Component {
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
-
+  const [isLoading, setIsLoading] = useState(false)
+  const setPages = usePagesStore((state)=> state.setPages)
   const handleNavigate = (page) => {
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -74,17 +76,22 @@ const App = () => {
   useEffect(() => {
   const fetchPages = async () => {
     try {
+      setIsLoading(true);
       const pages = await api.getPages();
-      console.log('Pages API response:', pages);
-    } catch (error) {
-      console.error('Failed to fetch pages:', error);
+      setPages(pages);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   fetchPages();
 }, []);
 
+
   const renderPage = () => {
+    if (isLoading) return <div>Loading Site Data...</div>
     try {
       switch (currentPage) {
         case 'home':

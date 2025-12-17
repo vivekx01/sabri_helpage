@@ -14,8 +14,16 @@ import SectionTitle from '../components/shared/SectionTitle';
 import TestimonialsSection from '../components/sections/TestimonialsSection';
 import ResponsiveImage from '../components/shared/ResponsiveImage';
 import YoutubeEmbed from '../components/shared/YoutubeEmbed';
+import { usePagesStore } from '../stores/pageInformationSlice';
 
 const HomePage = ({ onNavigate }) => {
+  const pageData = usePagesStore((state)=>state.getPageBySlug("home"))
+  React.useEffect(() => {
+    if (pageData) {
+      console.log("Home page data:", pageData);
+    }
+  }, [pageData]);
+
   const supporters = [
     "Google", "Microsoft", "Tata Trusts", "Reliance Foundation", "HDFC Bank"
   ];
