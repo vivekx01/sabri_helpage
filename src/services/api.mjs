@@ -39,9 +39,9 @@ const jsonRequest = async (endpoint, options = {}) => {
           localStorage.removeItem('adminToken');
           localStorage.removeItem('adminUser');
         }
-        // Redirect to login if we're not already there
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
+        // Redirect to admin login if we're not already there
+        if (!window.location.pathname.includes('/admin')) {
+          window.location.href = '/admin';
         }
       }
       
@@ -130,12 +130,34 @@ const api = {
       };
     }
   },
-  logout: () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUser');
+  logout: async () => {
+    try {
+      // Call backend logout endpoint if token exists
+      const token = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
+      if (token) {
+        try {
+          await jsonRequest('/api/auth/logout', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+        } catch (error) {
+          // Even if logout endpoint fails, continue with client-side cleanup
+          console.warn('Logout endpoint error (continuing with client-side logout):', error);
+        }
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // Always clear local storage and redirect
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminUser');
+        window.location.href = '/admin';
+      }
     }
-    window.location.href = '/admin/login';
   },
   getAdminPages: async () => authRequest('/api/admin/pages'),
   getAdminPage: async (slug) => authRequest(`/api/admin/pages/${slug}`),

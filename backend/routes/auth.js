@@ -82,6 +82,38 @@ router.post('/login', cors(corsOptions), async (req, res) => {
   }
 });
 
+// Logout route
+router.post('/logout', cors(corsOptions), async (req, res) => {
+  try {
+    // Get token from header
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (token) {
+      try {
+        // Verify token to get user info for logging
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        console.log(`User ${decoded.user.email} logged out`);
+      } catch (err) {
+        // Token might be expired or invalid, but we still allow logout
+        console.log('Logout requested with invalid/expired token');
+      }
+    }
+
+    // Since JWT is stateless, we just return success
+    // In a production app with token blacklisting, you'd invalidate the token here
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during logout'
+    });
+  }
+});
+
 // Register route (for creating super admin)
 router.post('/register', async (req, res) => {
   try {

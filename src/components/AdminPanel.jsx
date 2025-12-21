@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { LayoutDashboard, FileText, Settings, Menu, X, Search, Edit, Check, Archive, Trash2, Users, Lock, UserPlus, LogIn, ChevronRight, Plus, GripVertical, Image, Layout, Shield, UserCog, Eye, Globe, Palette, Bell, Database, Package, LogOut } from 'lucide-react';
 import api from '../services/api.mjs';
+import { usePagesStore } from '../stores/pageInformationSlice';
 
 const AdminPanel = () => {
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -10,8 +11,14 @@ const AdminPanel = () => {
   const [selectedSubsection, setSelectedSubsection] = useState('global');
   const [searchTerm, setSearchTerm] = useState('');
   const [editingSection, setEditingSection] = useState(null);
-  const [pages, setPages] = useState([]);
   const [pageDoc, setPageDoc] = useState(null);
+  
+  // Get pages from Zustand store
+  const storePages = usePagesStore((state) => state.pages);
+  const storeLoading = usePagesStore((state) => state.loading);
+  const storeError = usePagesStore((state) => state.error);
+  const fetchPages = usePagesStore((state) => state.fetchPages);
+  const getPageBySlug = usePagesStore((state) => state.getPageBySlug);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [contacts, setContacts] = useState([]);
@@ -61,72 +68,85 @@ const AdminPanel = () => {
     { label: 'Archived', value: '1', change: '0%', icon: Archive }
   ];
 
-  // Fetch basic admin data
+  // Check authentication on mount
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
-    if (token) {
-      try {
-        const userData = JSON.parse(localStorage.getItem('adminUser') || '{}');
-        setUser({ email: userData.email || 'admin', role: userData.role || 'admin' });
-      } catch (e) {
-        console.error('Error parsing user data:', e);
-      }
+    if (!token) {
+      // No token found, redirect to login
+      window.location.href = '/admin';
+      return;
+    }
+    
+    // Token exists, load user data
+    try {
+      const userData = JSON.parse(localStorage.getItem('adminUser') || '{}');
+      setUser({ email: userData.email || 'admin', role: userData.role || 'admin' });
+    } catch (e) {
+      console.error('Error parsing user data:', e);
     }
   }, []);
 
-  // Fetch pages when active section changes to pages
+  // Fetch pages from store when active section changes to pages
   useEffect(() => {
     if (activeSection !== 'pages') return;
     
-    const fetchPages = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const data = await api.getAdminPages();
-        console.log('Fetched pages:', data);
-        setPages(Array.isArray(data) ? data : []);
-      } catch (err) {
-        console.error('Failed to fetch pages:', err);
-        setError('Failed to load pages. Please try again.');
-        // If unauthorized, redirect to login
-        if (err.message.includes('401') || err.message.includes('unauthorized')) {
-          window.location.href = '/admin/login';
-        }
-      } finally {
-        setLoading(false);
+    // Fetch pages if store is empty
+    if (storePages.length === 0) {
+      fetchPages();
+    }
+  }, [activeSection, storePages.length, fetchPages]);
+  
+  // Sync store loading/error states
+  useEffect(() => {
+    if (activeSection === 'pages') {
+      setLoading(storeLoading);
+      if (storeError) {
+        setError(storeError);
       }
-    };
-
-    fetchPages();
-  }, [activeSection]);
+    }
+  }, [activeSection, storeLoading, storeError]);
 
   useEffect(() => {
-    if (!selectedPage) return;
-    setLoading(true);
-    setError('');
-    api.getAdminPage(selectedPage)
-      .then(data => setPageDoc(data))
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [selectedPage]);
+    if (!selectedPage) {
+      setPageDoc(null);
+      return;
+    }
+    
+    // Get page data from store instead of making API call
+    const pageData = getPageBySlug(selectedPage);
+    if (pageData) {
+      setPageDoc(pageData);
+      setError('');
+    } else {
+      // If page not found in store, it might not be loaded yet
+      setError('Page not found. Please refresh the pages list.');
+      setPageDoc(null);
+    }
+  }, [selectedPage, getPageBySlug]);
 
   useEffect(() => {
     if (activeSection !== 'contacts') return;
     setLoading(true);
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('adminToken');
     fetch('/api/admin/contacts', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
       .then(data => setContacts(Array.isArray(data) ? data : []))
       .finally(() => setLoading(false));
   }, [activeSection]);
 
+  // Extract slugs from store pages and filter
   const filteredPages = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return pages.filter(p => p.toLowerCase().includes(term));
-  }, [pages, searchTerm]);
+    // Extract slugs from page objects in store
+    const pageSlugs = storePages
+      .map(page => page.slug || page.name || String(page))
+      .filter(Boolean);
+    
+    return pageSlugs.filter(slug => slug.toLowerCase().includes(term));
+  }, [storePages, searchTerm]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
+  const handleLogout = async () => {
+    await api.logout();
     setUser(null);
   };
 
@@ -139,36 +159,310 @@ const AdminPanel = () => {
     };
   }, [pageDoc, selectedPage]);
 
-  const renderSectionEditor = (section) => {
-    return (
-      <div key={section.key} className="bg-white rounded-xl p-5 border border-gray-200">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="p-2 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg">
-            <Layout className="text-indigo-600" size={18} />
-          </div>
-          <h4 className="font-semibold text-gray-900 text-sm">{section.heading || section.key}</h4>
-        </div>
-        <div className="space-y-3">
-          <input
-            type="text"
-            value={section.heading || ''}
-            onChange={(e) => updateSection(section.key, { heading: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm"
-            placeholder="Heading"
-          />
+  const renderFieldEditor = (label, value, onChange, type = 'text', placeholder = '') => {
+    if (type === 'textarea') {
+      return (
+        <div key={label} className="space-y-1">
+          <label className="text-xs font-medium text-gray-700">{label}</label>
           <textarea
-            value={section.content || ''}
-            onChange={(e) => updateSection(section.key, { content: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm"
-            rows={4}
-            placeholder="Content"
+            value={value || ''}
+            onChange={onChange}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            rows={3}
+            placeholder={placeholder}
           />
+        </div>
+      );
+    }
+    
+    return (
+      <div key={label} className="space-y-1">
+        <label className="text-xs font-medium text-gray-700">{label}</label>
+        <input
+          type={type}
+          value={value || ''}
+          onChange={onChange}
+          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          placeholder={placeholder}
+        />
+      </div>
+    );
+  };
+
+  const renderArrayEditor = (label, items, onUpdate, itemType = 'object') => {
+    if (!items || !Array.isArray(items)) return null;
+    
+    // Get common fields from existing items to use as template for new items
+    const getCommonFields = () => {
+      if (items.length === 0) return [];
+      const firstItem = items.find(item => item && typeof item === 'object' && Object.keys(item).length > 0);
+      return firstItem ? Object.keys(firstItem) : [];
+    };
+    
+    const commonFields = getCommonFields();
+    
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-gray-700">{label} ({items.length})</label>
           <button
-            onClick={() => savePage()}
-            className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm"
+            onClick={() => {
+              // Create new item with common fields initialized to empty strings
+              const newItem = itemType === 'object' 
+                ? commonFields.reduce((acc, key) => ({ ...acc, [key]: '' }), {})
+                : '';
+              const updated = [...items, newItem];
+              onUpdate(updated);
+            }}
+            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
           >
-            Save Section
+            + Add Item
           </button>
+        </div>
+        <div className="space-y-3 border border-gray-200 rounded-lg p-3 bg-gray-50">
+          {items.map((item, idx) => {
+            const itemKeys = itemType === 'object' && item ? Object.keys(item) : [];
+            const hasFields = itemKeys.length > 0;
+            
+            return (
+              <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-600">Item {idx + 1}</span>
+                  <div className="flex items-center gap-2">
+                    {itemType === 'object' && (
+                      <button
+                        onClick={() => {
+                          const fieldName = prompt('Enter field name:');
+                          if (fieldName && fieldName.trim()) {
+                            const updated = [...items];
+                            updated[idx] = { ...item, [fieldName.trim()]: '' };
+                            onUpdate(updated);
+                          }
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                        title="Add Field"
+                      >
+                        + Field
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        const updated = items.filter((_, i) => i !== idx);
+                        onUpdate(updated);
+                      }}
+                      className="text-xs text-red-600 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                {itemType === 'object' ? (
+                  <div className="space-y-2">
+                    {hasFields ? (
+                      itemKeys.map((key) => (
+                        <div key={key} className="flex items-start gap-2">
+                          <div className="flex-1">
+                            {typeof item[key] === 'string' || typeof item[key] === 'number' ? (
+                              renderFieldEditor(
+                                key,
+                                item[key],
+                                (e) => {
+                                  const updated = [...items];
+                                  updated[idx] = { ...item, [key]: e.target.value };
+                                  onUpdate(updated);
+                                },
+                                key.toLowerCase().includes('description') || key.toLowerCase().includes('text') || key.toLowerCase().includes('content') ? 'textarea' : 'text'
+                              )
+                            ) : (
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-gray-700">{key}</label>
+                                <input
+                                  type="text"
+                                  value={JSON.stringify(item[key])}
+                                  onChange={(e) => {
+                                    try {
+                                      const parsed = JSON.parse(e.target.value);
+                                      const updated = [...items];
+                                      updated[idx] = { ...item, [key]: parsed };
+                                      onUpdate(updated);
+                                    } catch {}
+                                  }}
+                                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-xs"
+                                  placeholder="JSON value"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              const updated = [...items];
+                              const newItem = { ...item };
+                              delete newItem[key];
+                              updated[idx] = newItem;
+                              onUpdate(updated);
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700 mt-6 px-2"
+                            title="Remove Field"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        <p className="mb-2">No fields yet</p>
+                        <button
+                          onClick={() => {
+                            const fieldName = prompt('Enter field name:');
+                            if (fieldName && fieldName.trim()) {
+                              const updated = [...items];
+                              updated[idx] = { [fieldName.trim()]: '' };
+                              onUpdate(updated);
+                            }
+                          }}
+                          className="text-xs text-indigo-600 hover:text-indigo-700 font-medium border border-indigo-300 rounded px-3 py-1"
+                        >
+                          + Add First Field
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={item}
+                    onChange={(e) => {
+                      const updated = [...items];
+                      updated[idx] = e.target.value;
+                      onUpdate(updated);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm"
+                    placeholder="Enter value"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderObjectEditor = (label, obj, onUpdate, path = '') => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    
+    return (
+      <div className="space-y-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+        <label className="text-xs font-medium text-gray-700">{label}</label>
+        {Object.keys(obj).map((key) => {
+          const value = obj[key];
+          const fieldPath = path ? `${path}.${key}` : key;
+          
+          if (typeof value === 'string' || typeof value === 'number') {
+            return renderFieldEditor(
+              key,
+              value,
+              (e) => {
+                const updated = { ...obj, [key]: e.target.value };
+                onUpdate(updated);
+              }
+            );
+          } else if (Array.isArray(value)) {
+            return renderArrayEditor(
+              key,
+              value,
+              (updated) => {
+                const newObj = { ...obj, [key]: updated };
+                onUpdate(newObj);
+              },
+              typeof value[0] === 'object' ? 'object' : 'string'
+            );
+          } else if (typeof value === 'object' && value !== null) {
+            return renderObjectEditor(
+              key,
+              value,
+              (updated) => {
+                const newObj = { ...obj, [key]: updated };
+                onUpdate(newObj);
+              },
+              fieldPath
+            );
+          }
+          return null;
+        })}
+      </div>
+    );
+  };
+
+  const renderSectionEditor = (section) => {
+    const sectionType = section.type || 'unknown';
+    const sectionTitle = section.title || section.headline || section.heading || sectionType;
+    
+    return (
+      <div key={section.key} className="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg">
+              <Layout className="text-indigo-600" size={18} />
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 text-sm">{sectionTitle}</h4>
+              <p className="text-xs text-gray-500 capitalize">{sectionType} Section</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="space-y-4">
+          {/* Type field */}
+          {renderFieldEditor(
+            'Type',
+            section.type,
+            (e) => updateSection(section.key, { type: e.target.value })
+          )}
+          
+          {/* Render all simple fields */}
+          {Object.keys(section).filter(key => 
+            key !== 'key' && 
+            key !== 'type' &&
+            typeof section[key] !== 'object' &&
+            !Array.isArray(section[key])
+          ).map((key) => {
+            const value = section[key];
+            return renderFieldEditor(
+              key,
+              value,
+              (e) => updateSection(section.key, { [key]: e.target.value }),
+              key.toLowerCase().includes('description') || key.toLowerCase().includes('text') || key.toLowerCase().includes('content') ? 'textarea' : 'text'
+            );
+          })}
+          
+          {/* Render array fields */}
+          {Object.keys(section).filter(key => 
+            Array.isArray(section[key])
+          ).map((key) => {
+            const items = section[key];
+            return renderArrayEditor(
+              key,
+              items,
+              (updated) => updateSection(section.key, { [key]: updated }),
+              items.length > 0 && typeof items[0] === 'object' ? 'object' : 'string'
+            );
+          })}
+          
+          {/* Render object fields */}
+          {Object.keys(section).filter(key => 
+            typeof section[key] === 'object' && 
+            section[key] !== null && 
+            !Array.isArray(section[key]) &&
+            key !== 'key'
+          ).map((key) => {
+            const obj = section[key];
+            return renderObjectEditor(
+              key,
+              obj,
+              (updated) => updateSection(section.key, { [key]: updated })
+            );
+          })}
         </div>
       </div>
     );
@@ -186,7 +480,14 @@ const AdminPanel = () => {
     setLoading(true);
     setError('');
     try {
-      await api.updateAdminPage(selectedPage, { sections: pageDoc.sections });
+      const updatedPage = await api.updateAdminPage(selectedPage, { sections: pageDoc.sections });
+      // Update the store with the updated page data
+      const updatedPages = storePages.map(page => 
+        page.slug === selectedPage ? updatedPage : page
+      );
+      usePagesStore.getState().setPages(updatedPages);
+      // Update pageDoc with the response
+      setPageDoc(updatedPage);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -393,18 +694,34 @@ const AdminPanel = () => {
                   >
                     ← Back to Pages
                   </button>
-                  <button className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 flex items-center gap-2 shadow-sm">
-                    <Plus size={16} />
-                    Add Section
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={savePage}
+                      disabled={loading || !pageDoc}
+                      className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Check size={16} />
+                      {loading ? 'Saving...' : 'Save Page'}
+                    </button>
+                    <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-2 shadow-sm">
+                      <Plus size={16} />
+                      Add Section
+                    </button>
+                  </div>
                 </div>
+
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <p className="text-sm text-red-600">{error}</p>
+                  </div>
+                )}
 
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="p-2 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg">
                       <Layout className="text-indigo-600" size={24} />
                     </div>
-                    <h3 className="text-xl font-bold text-gray-900">{selectedPage} Page</h3>
+                    <h3 className="text-xl font-bold text-gray-900 capitalize">{selectedPage} Page</h3>
                   </div>
                   <p className="text-sm text-gray-600">
                     Manage all content sections using reusable components
@@ -412,7 +729,13 @@ const AdminPanel = () => {
                 </div>
 
                 <div className="space-y-4">
-                  {pageTemplates[selectedPage]?.sections?.map((section) => renderSectionEditor(section))}
+                  {pageTemplates[selectedPage]?.sections?.length > 0 ? (
+                    pageTemplates[selectedPage].sections.map((section) => renderSectionEditor(section))
+                  ) : (
+                    <div className="bg-gray-50 rounded-xl p-8 text-center border border-gray-200">
+                      <p className="text-gray-500 text-sm">No sections found for this page</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
